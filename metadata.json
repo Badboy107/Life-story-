@@ -1,6 +1,6 @@
 {
   "name": "Life Story",
-  "description": "A collaborative platform for sharing life stories, featuring real-time notifications, story saving, search, messaging, and AI-powered writing assistance.",
+  "description": "A premium platform for creators to share life stories, engage with followers, and monetize their content with AdSense integration.",
   "requestFramePermissions": [
     "camera",
     "microphone"

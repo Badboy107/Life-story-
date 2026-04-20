@@ -143,9 +143,27 @@
         "createdAt": { "type": "string", "format": "timestamp" }
       },
       "required": ["recipientId", "senderId", "type", "body", "createdAt", "isRead"]
+    },
+    "Draft": {
+      "title": "Draft",
+      "description": "An unpublished story draft.",
+      "type": "object",
+      "properties": {
+        "authorId": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "category": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "timestamp" }
+      },
+      "required": ["authorId", "title", "content", "category", "updatedAt"]
     }
   },
   "firestore": {
+    "/drafts/{draftId}": {
+      "schema": { "$ref": "#/entities/Draft" },
+      "description": "Stores unpublished story drafts."
+    },
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/User" },
       "description": "Stores user profiles."

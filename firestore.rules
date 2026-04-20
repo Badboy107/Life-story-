@@ -95,14 +95,15 @@ service cloud.firestore {
 
     // ==== STORY RULES ====
     function isValidStory(data) {
-      return data.keys().hasAll(['authorId', 'title', 'content', 'category', 'likesCount', 'commentsCount', 'createdAt', 'updatedAt'])
+      return data.keys().hasAll(['authorId', 'title', 'content', 'category', 'likesCount', 'commentsCount', 'viewsCount', 'createdAt', 'updatedAt'])
         && data.authorId is string && data.authorId.size() <= 128
         && data.title is string && data.title.size() > 0 && data.title.size() <= 200
-        && data.content is string && data.content.size() > 0 && data.content.size() <= 10000
+        && data.content is string && data.content.size() > 0 && data.content.size() <= 30000
         && data.category is string
         && data.likesCount is number
         && data.commentsCount is number
-        && (!data.keys().hasAny(['viewsCount']) || data.viewsCount is number)
+        && data.viewsCount is number
+        && (!data.keys().hasAny(['imageUrl']) || (data.imageUrl is string || data.imageUrl == null))
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -116,6 +117,7 @@ service cloud.firestore {
         && incoming().authorId == request.auth.uid
         && incoming().likesCount == 0
         && incoming().commentsCount == 0
+        && incoming().viewsCount == 0
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time;
 
@@ -151,7 +153,7 @@ service cloud.firestore {
         function isValidComment(data) {
           return data.keys().hasAll(['authorId', 'text', 'createdAt', 'updatedAt'])
             && data.authorId is string && data.authorId.size() <= 128
-            && data.text is string && data.text.size() > 0 && data.text.size() <= 1000
+            && data.text is string && data.text.size() > 0 && data.text.size() <= 3000
             && data.createdAt is timestamp
             && data.updatedAt is timestamp;
         }
@@ -161,6 +163,37 @@ service cloud.firestore {
         allow update: if isSignedIn() && request.auth.uid == existing().authorId && incoming().diff(existing()).affectedKeys().hasOnly(['text', 'updatedAt']);
         allow delete: if isSignedIn() && request.auth.uid == existing().authorId;
       }
+    }
+
+    // ==== DRAFTS RULES ====
+    function isValidDraft(data) {
+      return data.keys().hasAll(['authorId', 'title', 'content', 'category', 'updatedAt'])
+        && data.authorId == request.auth.uid
+        && data.title is string && data.title.size() <= 200
+        && data.content is string && data.content.size() <= 30000
+        && data.category is string
+        && (!data.keys().hasAny(['imageUrl']) || (data.imageUrl is string || data.imageUrl == null))
+        && (!data.keys().hasAny(['likesCount']) || data.likesCount is number)
+        && (!data.keys().hasAny(['commentsCount']) || data.commentsCount is number)
+        && (!data.keys().hasAny(['viewsCount']) || data.viewsCount is number)
+        && (!data.keys().hasAny(['createdAt']) || data.createdAt is timestamp)
+        && data.updatedAt is timestamp;
+    }
+
+    match /drafts/{draftId} {
+      allow get: if isSignedIn() && resource.data.authorId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.authorId == request.auth.uid;
+      
+      allow create: if isSignedIn() 
+        && isValidDraft(incoming())
+        && (!incoming().keys().hasAny(['createdAt']) || incoming().createdAt is timestamp);
+        
+      allow update: if isSignedIn() 
+        && resource.data.authorId == request.auth.uid 
+        && isValidDraft(incoming())
+        && incoming().authorId == existing().authorId;
+        
+      allow delete: if isSignedIn() && resource.data.authorId == request.auth.uid;
     }
 
     // ==== PAYOUT RULES ====
@@ -278,7 +311,7 @@ service cloud.firestore {
         return data.keys().hasAll(['recipientId', 'senderId', 'type', 'body', 'isRead', 'createdAt'])
           && data.recipientId is string && isValidId(data.recipientId)
           && data.senderId is string && isValidId(data.senderId)
-          && data.type in ['like', 'comment', 'message', 'follow']
+          && data.type in ['like', 'comment', 'message', 'follow', 'view']
           && data.body is string && data.body.size() > 0 && data.body.size() <= 500
           && (!data.keys().hasAny(['link']) || (data.link is string && data.link.size() <= 600))
           && data.isRead is bool
