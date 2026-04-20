@@ -1,0 +1,340 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isVerified() {
+      // In a real app we might check email verification, but here we can relax it slightly or omit if social login used 
+      return request.auth.token.email_verified == true || request.auth.token.firebase.sign_in_provider == 'google.com';
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isAdmin() {
+      // For this demo, let's assume specific UIDs are admins or just provide the placeholder
+      // In a real app we'd have an /admins/{uid} collection.
+      return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128;
+    }
+
+    function isValidFollow(data) {
+      return data.keys().hasAll(['followerId', 'followedId', 'createdAt'])
+        && data.keys().size() == 3
+        && data.followerId is string && data.followerId.size() <= 128
+        && data.followedId is string && data.followedId.size() <= 128
+        && data.createdAt is timestamp;
+    }
+
+    // ==== USER RULES ====
+    function isValidUser(data) {
+      return data.keys().hasAll(['email', 'displayName', 'createdAt'])
+        && data.email is string && data.email.size() <= 200
+        && data.displayName is string && data.displayName.size() <= 100
+        && (!data.keys().hasAny(['bio']) || (data.bio is string && data.bio.size() <= 500))
+        && (!data.keys().hasAny(['photoURL']) || (data.photoURL is string && data.photoURL.size() <= 500))
+        && (!data.keys().hasAny(['coverPhotoUrl']) || (data.coverPhotoUrl is string && data.coverPhotoUrl.size() <= 600))
+        && (!data.keys().hasAny(['followersCount']) || data.followersCount is number)
+        && (!data.keys().hasAny(['followingCount']) || data.followingCount is number)
+        && data.createdAt is timestamp;
+    }
+
+    match /users/{userId} {
+      // Any authenticated user can view basic profile (email, displayName, bio, photo)
+      allow get: if isSignedIn();
+      // To prevent bulk scraping
+      allow list: if isSignedIn() && existing().email == request.auth.token.email;
+      
+      allow create: if isSignedIn()
+        && request.auth.uid == userId
+        && isValidUser(incoming())
+        && incoming().keys().size() >= 3 && incoming().keys().size() <= 7
+        && incoming().email == request.auth.token.email
+        && incoming().createdAt == request.time;
+        
+      allow update: if isSignedIn()
+        && request.auth.uid == userId
+        && isValidUser(incoming())
+        && (
+          // Case 1: Owner updates profile
+          (
+            incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL', 'coverPhotoUrl', 'bio', 'followersCount', 'followingCount'])
+          )
+        );
+        // Special case for follower count increments will be handled by more granular rules if needed, 
+        // but for now allowing owner to update these fields (usually from a cloud function or similar, 
+        // but here from client side for simplicity). 
+
+      match /followers/{followerId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() && followerId == request.auth.uid && isValidFollow(incoming());
+        allow delete: if isSignedIn() && followerId == request.auth.uid;
+      }
+      
+      match /following/{followedId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() && request.auth.uid == userId && isValidFollow(incoming());
+        allow delete: if isSignedIn() && request.auth.uid == userId;
+      }
+    }
+
+    // ==== STORY RULES ====
+    function isValidStory(data) {
+      return data.keys().hasAll(['authorId', 'title', 'content', 'category', 'likesCount', 'commentsCount', 'createdAt', 'updatedAt'])
+        && data.authorId is string && data.authorId.size() <= 128
+        && data.title is string && data.title.size() > 0 && data.title.size() <= 200
+        && data.content is string && data.content.size() > 0 && data.content.size() <= 10000
+        && data.category is string
+        && data.likesCount is number
+        && data.commentsCount is number
+        && (!data.keys().hasAny(['viewsCount']) || data.viewsCount is number)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    match /stories/{storyId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn(); 
+
+      allow create: if isSignedIn()
+        && isValidStory(incoming())
+        && incoming().authorId == request.auth.uid
+        && incoming().likesCount == 0
+        && incoming().commentsCount == 0
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isSignedIn()
+        && isValidStory(incoming())
+        && incoming().authorId == existing().authorId
+        && (
+          // Case 1: Owner updates content
+          (
+            request.auth.uid == existing().authorId &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['title', 'content', 'category', 'imageUrl', 'updatedAt'])
+          ) ||
+          // Case 2: Any signed in user likes/unlikes or comments
+          (
+            incoming().diff(existing()).affectedKeys().hasOnly(['likesCount']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['commentsCount']) ||
+            // Increment views
+            incoming().diff(existing()).affectedKeys().hasOnly(['viewsCount'])
+          )
+        );
+
+      allow delete: if isSignedIn() && request.auth.uid == existing().authorId;
+
+      // ==== LIKES ====
+      match /likes/{likeId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() && likeId == request.auth.uid && incoming().userId == request.auth.uid;
+        allow delete: if isSignedIn() && likeId == request.auth.uid;
+      }
+
+      // ==== COMMENTS ====
+      match /comments/{commentId} {
+        function isValidComment(data) {
+          return data.keys().hasAll(['authorId', 'text', 'createdAt', 'updatedAt'])
+            && data.authorId is string && data.authorId.size() <= 128
+            && data.text is string && data.text.size() > 0 && data.text.size() <= 1000
+            && data.createdAt is timestamp
+            && data.updatedAt is timestamp;
+        }
+
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() && isValidComment(incoming()) && incoming().authorId == request.auth.uid;
+        allow update: if isSignedIn() && request.auth.uid == existing().authorId && incoming().diff(existing()).affectedKeys().hasOnly(['text', 'updatedAt']);
+        allow delete: if isSignedIn() && request.auth.uid == existing().authorId;
+      }
+    }
+
+    // ==== PAYOUT RULES ====
+    function isValidPayoutRequest(data) {
+      return data.keys().hasAll(['userId', 'amount', 'status', 'method', 'createdAt', 'updatedAt'])
+        && data.keys().size() == 6
+        && data.userId is string && isValidId(data.userId)
+        && data.amount is number && data.amount > 0
+        && data.status in ['pending', 'completed', 'failed']
+        && data.method is string && data.method.size() <= 200
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    match /payout_requests/{requestId} {
+      allow get: if isSignedIn() && (request.auth.uid == existing().userId || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+
+      allow create: if isSignedIn()
+        && isValidId(requestId)
+        && isValidPayoutRequest(incoming())
+        && incoming().userId == request.auth.uid
+        && incoming().status == 'pending'
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      
+      allow update: if isSignedIn() && isAdmin(); 
+    }
+
+    function isValidPayoutSettings(data) {
+      return data.keys().hasAll(['userId', 'method', 'details', 'createdAt', 'updatedAt'])
+        && data.keys().size() == 5
+        && data.userId is string && isValidId(data.userId)
+        && data.method is string && data.method.size() <= 100
+        && data.details is string && data.details.size() <= 1000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    match /payout_settings/{userId} {
+      allow get: if isSignedIn() && request.auth.uid == userId;
+      
+      allow create: if isSignedIn()
+        && request.auth.uid == userId
+        && isValidPayoutSettings(incoming())
+        && incoming().userId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+        
+      allow update: if isSignedIn()
+        && request.auth.uid == userId
+        && isValidPayoutSettings(incoming())
+        && incoming().userId == userId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['method', 'details', 'updatedAt']);
+    }
+
+    // ==== CHAT RULES ====
+    function isValidConversation(data) {
+      return data.keys().hasAll(['participants', 'lastMessageAt', 'updatedAt'])
+        && data.participants is list
+        && data.participants.size() >= 2 && data.participants.size() <= 10
+        && data.lastMessageAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    match /conversations/{conversationId} {
+      allow get: if isSignedIn() && (resource == null || request.auth.uid in resource.data.participants);
+      allow list: if isSignedIn() && request.auth.uid in resource.data.participants;
+
+      allow create: if isSignedIn()
+        && isValidId(conversationId)
+        && isValidConversation(incoming())
+        && request.auth.uid in incoming().participants
+        && incoming().lastMessageAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isSignedIn()
+        && request.auth.uid in existing().participants
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['lastMessage', 'lastMessageAt', 'updatedAt', 'lastRead', 'typing', 'unreadCount'])
+        )
+        && incoming().updatedAt == request.time;
+
+      match /messages/{messageId} {
+        function isValidMessage(data) {
+          return data.keys().hasAll(['senderId', 'text', 'createdAt'])
+            && data.keys().size() == 3
+            && data.senderId == request.auth.uid
+            && data.text is string && data.text.size() > 0 && data.text.size() <= 1000
+            && data.createdAt is timestamp;
+        }
+
+        function isParticipant() {
+          return exists(/databases/$(database)/documents/conversations/$(conversationId)) 
+            && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants;
+        }
+
+        allow read: if isSignedIn() && isParticipant();
+
+        allow create: if isSignedIn()
+          && isParticipant()
+          && isValidMessage(incoming())
+          && incoming().createdAt == request.time;
+
+        allow delete: if isSignedIn()
+          && isParticipant()
+          && request.auth.uid == existing().senderId;
+      }
+    }
+
+    match /notifications/{notificationId} {
+      function isValidNotification(data) {
+        return data.keys().hasAll(['recipientId', 'senderId', 'type', 'body', 'isRead', 'createdAt'])
+          && data.recipientId is string && isValidId(data.recipientId)
+          && data.senderId is string && isValidId(data.senderId)
+          && data.type in ['like', 'comment', 'message', 'follow']
+          && data.body is string && data.body.size() > 0 && data.body.size() <= 500
+          && (!data.keys().hasAny(['link']) || (data.link is string && data.link.size() <= 600))
+          && data.isRead is bool
+          && data.createdAt is timestamp;
+      }
+
+      allow get: if isSignedIn() && resource.data.recipientId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.recipientId == request.auth.uid;
+      allow create: if isSignedIn() && isValidNotification(incoming()) && incoming().senderId == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.recipientId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['isRead']);
+    }
+
+    // ==== CALL RULES ====
+    function isValidCall(data) {
+      return data.keys().hasAll(['senderId', 'recipientId', 'type', 'status', 'createdAt'])
+        && data.senderId is string && isValidId(data.senderId)
+        && data.recipientId is string && isValidId(data.recipientId)
+        && data.type in ['audio', 'video']
+        && data.status in ['ringing', 'accepted', 'rejected', 'ended']
+        && data.createdAt is timestamp;
+    }
+
+    match /calls/{callId} {
+      allow get: if isSignedIn() && (resource.data.senderId == request.auth.uid || resource.data.recipientId == request.auth.uid);
+      allow list: if isSignedIn() && (resource.data.senderId == request.auth.uid || resource.data.recipientId == request.auth.uid);
+      
+      allow create: if isSignedIn() 
+        && isValidCall(incoming()) 
+        && incoming().senderId == request.auth.uid
+        && incoming().status == 'ringing'
+        && incoming().createdAt == request.time;
+      
+      allow update: if isSignedIn()
+        && (existing().senderId == request.auth.uid || existing().recipientId == request.auth.uid)
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status'])
+        && (
+          // Recipient can accept or reject
+          (request.auth.uid == existing().recipientId && existing().status == 'ringing' && incoming().status in ['accepted', 'rejected']) ||
+          // Either can end
+          (incoming().status == 'ended')
+        );
+      
+      allow delete: if isSignedIn() && isAdmin();
+    }
+
+    match /users/{userId}/savedStories/{storyId} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+    }
+
+    // ==== REPORT RULES ====
+    match /reports/{reportId} {
+      allow create: if isSignedIn() 
+        && incoming().reporterId == request.auth.uid
+        && incoming().status == 'pending'
+        && incoming().createdAt == request.time;
+      allow read, update: if isAdmin();
+    }
+  }
+}

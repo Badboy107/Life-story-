@@ -1,0 +1,202 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile containing basic information and bio.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "coverPhotoUrl": { "type": "string" },
+        "bio": { "type": "string" },
+        "createdAt": { "type": "string", "format": "timestamp" },
+        "followersCount": { "type": "number", "default": 0 },
+        "followingCount": { "type": "number", "default": 0 }
+      },
+      "required": ["email", "displayName", "createdAt"]
+    },
+    "Story": {
+      "title": "Story",
+      "description": "A story post created by a user.",
+      "type": "object",
+      "properties": {
+        "authorId": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "category": { "type": "string", "enum": ["romantic", "thriller", "educational", "motivational", "general"] },
+        "imageUrl": { "type": "string" },
+        "likesCount": { "type": "number" },
+        "commentsCount": { "type": "number" },
+        "viewsCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "timestamp" },
+        "updatedAt": { "type": "string", "format": "timestamp" }
+      },
+      "required": ["authorId", "title", "content", "category", "likesCount", "commentsCount", "createdAt", "updatedAt"]
+    },
+    "Like": {
+      "title": "Like",
+      "description": "A like on a story.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "timestamp" }
+      },
+      "required": ["userId", "createdAt"]
+    },
+    "Comment": {
+      "title": "Comment",
+      "description": "A comment left on a story.",
+      "type": "object",
+      "properties": {
+        "authorId": { "type": "string" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string", "format": "timestamp" },
+        "updatedAt": { "type": "string", "format": "timestamp" }
+      },
+      "required": ["authorId", "text", "createdAt", "updatedAt"]
+    },
+    "Follow": {
+      "title": "Follow",
+      "description": "A user following another user.",
+      "type": "object",
+      "properties": {
+        "followerId": { "type": "string" },
+        "followedId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "timestamp" }
+      },
+      "required": ["followerId", "followedId", "createdAt"]
+    },
+    "PayoutRequest": {
+      "title": "Payout Request",
+      "description": "A request for withdrawing earnings.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "amount": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "completed", "failed"] },
+        "method": { "type": "string" },
+        "createdAt": { "type": "string", "format": "timestamp" },
+        "updatedAt": { "type": "string", "format": "timestamp" }
+      },
+      "required": ["userId", "amount", "status", "method", "createdAt", "updatedAt"]
+    },
+    "PayoutSettings": {
+      "title": "Payout Settings",
+      "description": "User's payout preferences.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "method": { "type": "string" },
+        "details": { "type": "string" },
+        "createdAt": { "type": "string", "format": "timestamp" },
+        "updatedAt": { "type": "string", "format": "timestamp" }
+      },
+      "required": ["userId", "method", "details", "createdAt", "updatedAt"]
+    },
+    "Conversation": {
+      "title": "Conversation",
+      "description": "A chat conversation between users.",
+      "type": "object",
+      "properties": {
+        "participants": { "type": "array", "items": { "type": "string" } },
+        "lastMessage": { "type": "string" },
+        "lastMessageAt": { "type": "string", "format": "timestamp" },
+        "updatedAt": { "type": "string", "format": "timestamp" },
+        "lastRead": { "type": "object", "description": "Mapping of userId to their last read timestamp." },
+        "typing": { "type": "object", "description": "Mapping of userId to their typing status boolean." }
+      },
+      "required": ["participants", "lastMessageAt", "updatedAt"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "A message sent in a conversation.",
+      "type": "object",
+      "properties": {
+        "senderId": { "type": "string" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string", "format": "timestamp" }
+      },
+      "required": ["senderId", "text", "createdAt"]
+    },
+    "SavedStory": {
+      "title": "Saved Story",
+      "description": "A story bookmarked by a user.",
+      "type": "object",
+      "properties": {
+        "storyId": { "type": "string" },
+        "savedAt": { "type": "string", "format": "timestamp" }
+      },
+      "required": ["storyId", "savedAt"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "An alert for an action like a like, comment, message, or follow.",
+      "type": "object",
+      "properties": {
+        "recipientId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "type": { "type": "string", "enum": ["like", "comment", "message", "follow"] },
+        "body": { "type": "string" },
+        "link": { "type": "string" },
+        "isRead": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "timestamp" }
+      },
+      "required": ["recipientId", "senderId", "type", "body", "createdAt", "isRead"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Stores user profiles."
+    },
+    "/users/{userId}/followers/{followerId}": {
+      "schema": { "$ref": "#/entities/Follow" },
+      "description": "Stores users who follow this user."
+    },
+    "/users/{userId}/following/{followedId}": {
+      "schema": { "$ref": "#/entities/Follow" },
+      "description": "Stores users this user follows."
+    },
+    "/stories/{storyId}": {
+      "schema": { "$ref": "#/entities/Story" },
+      "description": "Stores globally readable stories."
+    },
+    "/stories/{storyId}/likes/{likeId}": {
+      "schema": { "$ref": "#/entities/Like" },
+      "description": "Stores likes for a specific story."
+    },
+    "/stories/{storyId}/comments/{commentId}": {
+      "schema": { "$ref": "#/entities/Comment" },
+      "description": "Stores comments for a specific story."
+    },
+    "/follows/{followId}": {
+      "schema": { "$ref": "#/entities/Follow" },
+      "description": "Stores follow relationships between users globally."
+    },
+    "/payout_requests/{requestId}": {
+      "schema": { "$ref": "#/entities/PayoutRequest" },
+      "description": "Stores payout requests."
+    },
+    "/payout_settings/{userId}": {
+      "schema": { "$ref": "#/entities/PayoutSettings" },
+      "description": "Stores payout settings for each user."
+    },
+    "/conversations/{conversationId}": {
+      "schema": { "$ref": "#/entities/Conversation" },
+      "description": "Stores chat conversations."
+    },
+    "/conversations/{conversationId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/Message" },
+      "description": "Stores messages within a conversation."
+    },
+    "/users/{userId}/savedStories/{storyId}": {
+      "schema": { "$ref": "#/entities/SavedStory" },
+      "description": "Stores stories saved by the user."
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/Notification" },
+      "description": "Stores notifications for users."
+    }
+  }
+}
